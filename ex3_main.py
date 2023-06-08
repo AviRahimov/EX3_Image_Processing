@@ -1,3 +1,4 @@
+import numpy as np
 from matplotlib import pyplot as plt
 from ex3_utils import *
 import time
@@ -303,7 +304,6 @@ def pyrLaplacianDemo(img_path):
 
     lap_pyr = laplaceianReduce(img, lvls)
     re_lap = laplaceianExpand(lap_pyr)
-
     f, ax = plt.subplots(2, lvls + 1)
     plt.gray()
     for i in range(lvls):
@@ -346,18 +346,18 @@ def main():
     print("ID:", myID())
 
     img_path = 'input/boxMan.jpg'
-    lkDemo(img_path)
-    hierarchicalkDemo(img_path)
-    compareLK(img_path)
-    # rigidlkdemo('input/boxMan.jpg')
-    # translationcorrdemo('input/boxMan.jpg')
-    # rigidcorrdemo('input/boxMan.jpg')
-    # translationlkdemo('input/pyr_bit.jpg')
-    # imageWarpingDemo(img_path)
+    # lkDemo(img_path) # work good
+    # hierarchicalkDemo(img_path) # work good
+    # compareLK(img_path) # work good
+    # translationlkdemo('input/sunset .jpg') # work good
+    # rigidlkdemo('input/pyr_bit.jpg') # work good
+    # translationcorrdemo('input/boxMan.jpg') # work well(slow)
+    # rigidcorrdemo('input/sunset .jpg') # not working
+    # imageWarpingDemo(img_path) # work good
 
     # pyrGaussianDemo('input/pyr_bit.jpg') # works good
-    # pyrLaplacianDemo('input/pyr_bit.jpg')
-    # blendDemo()
+    pyrLaplacianDemo('input/pyr_bit.jpg') # not working
+    # blendDemo() # need to fill
 
 
 if __name__ == '__main__':

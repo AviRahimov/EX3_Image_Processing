@@ -82,6 +82,7 @@ def opticalFlow(im1: np.ndarray, im2: np.ndarray, step_size=10,
             original_points.append([j, i])
     return np.array(original_points), np.array(vector_for_points)
 
+
 def opticalFlowPyrLK(img1: np.ndarray, img2: np.ndarray, k: int,
                      stepSize: int, winSize: int) -> np.ndarray:
     """
@@ -135,73 +136,51 @@ def opticalFlowPyrLK(img1: np.ndarray, img2: np.ndarray, k: int,
 # ------------------------ Image Alignment & Warping ------------------------
 # ---------------------------------------------------------------------------
 
-
-# def find_vec_of_transformMed(mat: np.ndarray):
-#     """
-#     This method calculates the median of the (u,v) vector from @mat.
-#     :param mat: array of the vectors of the OP
-#     :return: the median vector - (u,v)
-#     """
-#
-#
-# def find_vec_of_transform(img1: np.ndarray, img2: np.ndarray, mat: np.ndarray):
-#     """
-#     This function returns best vector that suits the translation between @img1 to @img2.
-#     :param img1: first image
-#     :param img2: second image
-#     :param mat: array of the vectors of the OP
-#     :return: vector - [u,v]
-#     """
-
-
-def findTranslationLK(im1: np.ndarray, im2: np.ndarray) -> np.ndarray:
+def findTranslationLK(im1: np.ndarray, im2: np.ndarray, num_iterations=5) -> np.ndarray:
     """
     :param im1: image 1 in grayscale format.
     :param im2: image 1 after Translation.
+    :param num_iterations: number of iterations for iterative refinement.
+    :param regularization: regularization parameter to handle singular matrices.
     :return: Translation matrix by LK.
     """
-    # Convert images to float32
-    im1 = im1.astype(np.float32)
-    im2 = im2.astype(np.float32)
+    # Compute image gradients
+    Ix = cv2.filter2D(im1, -1, np.array([[-1, 1]]), borderType=cv2.BORDER_REPLICATE)
+    Iy = cv2.filter2D(im1, -1, np.array([[-1], [1]]), borderType=cv2.BORDER_REPLICATE)
+    It = im2 - im1
 
-    # Compute the gradient of im1
-    grad_x = cv2.Sobel(im1, cv2.CV_32F, 1, 0)
-    grad_y = cv2.Sobel(im1, cv2.CV_32F, 0, 1)
-
-    # Compute the optical flow using LK method
-    flow = cv2.calcOpticalFlowFarneback(im1, im2, None, 0.5, 3, 15, 3, 5, 1.2, 0)
-
-    # Extract the x and y components of the flow
-    flow_x = flow[:,:,0]
-    flow_y = flow[:,:,1]
-
-    # Compute the elements of the normal equation
-    A11 = np.sum(grad_x * grad_x)
-    A12 = np.sum(grad_x * grad_y)
-    A22 = np.sum(grad_y * grad_y)
-    b1 = np.sum(grad_x * (im1 - im2 + flow_x))
-    b2 = np.sum(grad_y * (im1 - im2 + flow_y))
-
-    # Solve the normal equation for the translation vector
-    A = np.array([[A11, A12], [A12, A22]])
-    b = np.array([b1, b2])
-    t = np.linalg.solve(A, b)
-
-    # Return the translation matrix
+    # Initialize translation matrix
     T = np.eye(3)
-    T[0, 2] = np.int(t[0]*1000)
-    T[1, 2] = np.int(t[1]*1000)
+
+    for _ in range(num_iterations):
+        # Warp image using current translation matrix
+        warped_im1 = cv2.warpPerspective(im1, T, (im1.shape[1], im1.shape[0]))
+
+        # Compute error and gradient of warped image
+        error = warped_im1 - im2
+        Ix_w = cv2.filter2D(warped_im1, -1, np.array([[-1, 1]]), borderType=cv2.BORDER_REPLICATE)
+        Iy_w = cv2.filter2D(warped_im1, -1, np.array([[-1], [1]]), borderType=cv2.BORDER_REPLICATE)
+
+        # Compute the elements of the matrix A and vector b with regularization
+        A11 = np.sum(Ix_w * Ix_w) + 0.01
+        A12 = np.sum(Ix_w * Iy_w)
+        A22 = np.sum(Iy_w * Iy_w) + 0.01
+        b1 = -np.sum(Ix_w * error)
+        b2 = -np.sum(Iy_w * error)
+
+        # Solve the system of equations
+        A = np.array([[A11, A12], [A12, A22]])
+        b = np.array([b1, b2])
+        v = np.linalg.solve(A, b)
+
+        # Limit maximum translation per iteration
+        v[0] = np.abs(np.clip(v[0], -10, 10))
+        v[1] = np.abs(np.clip(v[1], -10, 10))
+        # Update translation matrix
+        T[0, 2] -= v[0]
+        T[1, 2] -= v[1]
+
     return T
-
-
-
-# def bestAngle(img1: np.ndarray, img2: np.ndarray) -> float:
-#     """
-#     This function go over all the possibilities for an angle between two images (0-359).
-#     :param img1: first image
-#     :param img2: second image
-#     :return: the best angle
-#     """
 
 
 def findRigidLK(im1: np.ndarray, im2: np.ndarray) -> np.ndarray:
@@ -210,16 +189,35 @@ def findRigidLK(im1: np.ndarray, im2: np.ndarray) -> np.ndarray:
     :param im2: image 1 after Rigid.
     :return: Rigid matrix by LK.
     """
+    EPS = 0.000001
+    min_error = np.inf
+    final_rotation = np.eye(3, dtype=np.float32)  # Identity matrix
+    directions = opticalFlow(im1, im2)[1]
+    final_rotated_img = np.zeros_like(im1)
 
+    for u, v in directions:
+        angle = np.arctan2(v, u) * 180 / np.pi  # Convert angle to degrees
 
-# def findCorrelation(img1: np.ndarray, img2: np.ndarray):
-#     """
-#     This function looks for two points, one from @img1 and second from @img2.
-#     The two points are the ones with the highest correlation.
-#     :param img1: first image
-#     :param img2: second image
-#     :return: 2 points - x1, y1, x2, y2
-#     """
+        rotation_matrix = np.array([[np.cos(angle), -np.sin(angle), 0],
+                                    [np.sin(angle), np.cos(angle), 0],
+                                    [0, 0, 1]], dtype=np.float32)
+
+        rotated_img = cv2.warpPerspective(im1, rotation_matrix, im1.shape[::-1])  # Rotate the image
+        mse = np.mean(np.square(im2 - rotated_img))  # Calculate the mean squared error
+
+        if mse < min_error:
+            min_error = mse
+            final_rotation = rotation_matrix
+            final_rotated_img = rotated_img.copy()
+
+        if mse < EPS:
+            break
+
+    translation = findTranslationLK(final_rotated_img, im2)  # Find the translation from the rotated image to im2
+    translation[0, 2] = -1  # Set the correct translation value for x-axis
+    translation[1, 2] = -1  # Set the correct translation value for y-axis
+    final_ans = translation @ final_rotation  # Dot product for getting the rigid matrix
+    return final_ans
 
 
 def findTranslationCorr(im1: np.ndarray, im2: np.ndarray) -> np.ndarray:
@@ -228,23 +226,33 @@ def findTranslationCorr(im1: np.ndarray, im2: np.ndarray) -> np.ndarray:
     :param im2: image 1 after Translation.
     :return: Translation matrix by correlation.
     """
-    # Compute the cross-correlation between the two images
-    corr = correlate2d(im1, im2)
+    EPS = 0.001
+    relevant_gap = 100
 
-    # Find the peak of the correlation matrix
-    peak = np.unravel_index(np.argmax(corr), corr.shape)
+    # Generate a grid of translation values
+    y_range = np.arange(-relevant_gap, relevant_gap)
+    x_range = np.arange(-relevant_gap, relevant_gap)
+    translations = np.array(np.meshgrid(y_range, x_range)).T.reshape(-1, 2)
 
-    # Compute the translation vector as the difference between the peak and the center of the matrix
-    center = np.array(corr.shape) // 2
-    translation = peak - center
-    # Create a 3x3 identity matrix
-    translation_matrix = np.eye(3)
+    min_error = np.inf
+    final_ans = np.array([[1, 0, 0],
+                          [0, 1, 0],
+                          [0, 0, 1]], dtype=np.float32)
 
-    # Assign the translation vector to the last column
-    translation_matrix[:2, 2] = translation
+    for translation in translations:
+        check = np.array([[1, 0, translation[0]],
+                          [0, 1, translation[1]],
+                          [0, 0, 1]], dtype=np.float32)
+        moved_img = cv2.warpPerspective(im1, check, im1.shape[::-1])
+        mse = np.square(im2 - moved_img).mean()
 
-    # Return the translation matrix
-    return translation_matrix
+        if mse < min_error:
+            min_error = mse
+            final_ans = check.copy()
+        if mse < EPS:
+            return final_ans
+
+    return final_ans
 
 
 def findRigidCorr(im1: np.ndarray, im2: np.ndarray) -> np.ndarray:
@@ -253,22 +261,32 @@ def findRigidCorr(im1: np.ndarray, im2: np.ndarray) -> np.ndarray:
     :param im2: image 1 after Rigid.
     :return: Rigid matrix by correlation.
     """
-    # Compute the cross-correlation of both images using the efficient FFT-based method
-    corr = np.fft.ifft2(np.fft.fft2(im1) * np.fft.fft2(im2[::-1, ::-1], im1.shape))
+    EPS = 0.000001
+    min_error = np.inf
+    final_rotation = np.eye(3, dtype=np.float32)  # Initialize as identity matrix
+    final_rotated_img = None
 
-    # Find the index of the maximum correlation value
-    max_index = np.unravel_index(np.argmax(corr), corr.shape)
+    # Iterate over angles in radians instead of degrees
+    angles = np.linspace(0, 2 * np.pi, num=360, endpoint=False)
+    for alpha in angles:
+        rotation_matrix = np.array([[np.cos(alpha), -np.sin(alpha), 0],
+                                    [np.sin(alpha), np.cos(alpha), 0],
+                                    [0, 0, 1]], dtype=np.float32)
+        rotated_img = cv2.warpPerspective(im1, rotation_matrix, im1.shape[::-1])
+        mse = np.square(im2 - rotated_img).mean()
+        print(mse)
+        if mse < min_error:
+            min_error = mse
+            final_rotation = rotation_matrix.copy()
+            final_rotated_img = rotated_img.copy()
 
-    # Calculate the translation matrix based on the max correlation index
-    shift = np.array(max_index[::-1]) - np.array(corr.shape[::-1]) // 2
-    translation_matrix = np.eye(3)
-    translation_matrix[:2, 2] = shift
+        if mse < EPS:
+            break
 
-    return translation_matrix
+    translation = findTranslationCorr(final_rotated_img, im2)
+    final_ans = np.matmul(translation, final_rotation)
 
-
-
-
+    return final_ans
 
 
 def warpImages(im1: np.ndarray, im2: np.ndarray, T: np.ndarray) -> np.ndarray:
@@ -280,19 +298,22 @@ def warpImages(im1: np.ndarray, im2: np.ndarray, T: np.ndarray) -> np.ndarray:
     :return: warp image 2 according to T and display both image1
     and the wrapped version of the image2 in the same figure.
     """
-    height, weight = im2.shape
+    height, width = im2.shape
 
-    X, Y = np.meshgrid(range(weight), range(height))
+    X, Y = np.meshgrid(range(width), range(height))
     new_img = np.array([X.flatten(), Y.flatten(), np.ones_like(X.flatten())])
 
     old_img = (np.linalg.inv(T)) @ new_img
-    first_mask = (old_img[0, :] > weight) | (old_img[0, :] < 0)
+    first_mask = (old_img[0, :] > width) | (old_img[0, :] < 0)
     second_mask = (old_img[1, :] > height) | (old_img[1, :] < 0)
     old_img[0, :][first_mask] = 0
     old_img[1, :][second_mask] = 0
+
     transformed_img = im2[old_img[1, :].astype(int), old_img[0, :].astype(int)]
+    transformed_img = transformed_img.reshape((height, width))  # Reshape the transformed image
 
     return transformed_img
+
 
 
 # ---------------------------------------------------------------------------
@@ -309,10 +330,11 @@ def gaussianPyr(img: np.ndarray, levels: int = 4) -> List[np.ndarray]:
     """
     gaussian_pyr = [img]
     for i in range(1, levels):
-        I_temp = cv2.GaussianBlur(gaussian_pyr[i-1], (5, 5), 0)
+        I_temp = cv2.GaussianBlur(gaussian_pyr[i - 1], (5, 5), 0)
         I_temp = I_temp[::2, ::2]
         gaussian_pyr.append(I_temp)
     return gaussian_pyr
+
 
 def laplaceianReduce(img: np.ndarray, levels: int = 4) -> List[np.ndarray]:
     """
@@ -325,9 +347,10 @@ def laplaceianReduce(img: np.ndarray, levels: int = 4) -> List[np.ndarray]:
     laplacian_pyr = []
     for i in range(1, levels):
         blur_img_expanded = gaussExpand(gaussian_pyramid[i], (5, 5))
-        laplacian_img = cv2.subtract(gaussian_pyramid[i-1], blur_img_expanded)
+        laplacian_img = cv2.subtract(gaussian_pyramid[i - 1], blur_img_expanded)
         laplacian_pyr.append(laplacian_img)
     return laplacian_pyr
+
 
 def laplaceianExpand(lap_pyr: List[np.ndarray]) -> np.ndarray:
     """
@@ -339,8 +362,9 @@ def laplaceianExpand(lap_pyr: List[np.ndarray]) -> np.ndarray:
     # reverse traversal i.e. starts with the smallest laplacian image
     for i in range(len(lap_pyr) - 1, 0, -1):
         expanded_orig_img = gaussExpand(orig_img, (5, 5))
-        orig_img = cv2.add(lap_pyr[i-1], expanded_orig_img)
+        orig_img = cv2.add(lap_pyr[i - 1], expanded_orig_img)
     return orig_img
+
 
 def pyrBlend(img_1: np.ndarray, img_2: np.ndarray,
              mask: np.ndarray, levels: int) -> (np.ndarray, np.ndarray):
