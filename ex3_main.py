@@ -251,7 +251,6 @@ def imageWarpingDemo(img_path):
     t = np.array([[1, 0, 2],
                   [0, 1, 1],
                   [0, 0, 1]], dtype=np.float)
-
     img_2 = cv2.warpPerspective(img_1, t, img_1.shape[::-1])
     st = time.time()
     im2 = warpImages(img_1.astype(np.float), img_2.astype(np.float), t)
@@ -352,11 +351,11 @@ def main():
     # translationlkdemo('input/sunset .jpg') # work good
     # rigidlkdemo('input/pyr_bit.jpg') # work good
     # translationcorrdemo('input/boxMan.jpg') # work well(slow)
-    # rigidcorrdemo('input/sunset .jpg') # not working
+    # rigidcorrdemo('input/sunset .jpg') # work good
     # imageWarpingDemo(img_path) # work good
 
     # pyrGaussianDemo('input/pyr_bit.jpg') # works good
-    pyrLaplacianDemo('input/pyr_bit.jpg') # not working
+    # pyrLaplacianDemo('input/pyr_bit.jpg') # works good
     # blendDemo() # need to fill
 
 

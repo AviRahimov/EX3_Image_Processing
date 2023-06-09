@@ -1,17 +1,7 @@
-# import itertools
-# import math
-# import sys
 from typing import List
-
 import numpy as np
 import cv2
-# from numpy.linalg import LinAlgError
-# import matplotlib.pyplot as plt
 import warnings
-
-# from sklearn.metrics import mean_squared_error
-import scipy
-from scipy.signal import correlate2d
 
 warnings.filterwarnings('ignore')
 
@@ -141,14 +131,8 @@ def findTranslationLK(im1: np.ndarray, im2: np.ndarray, num_iterations=5) -> np.
     :param im1: image 1 in grayscale format.
     :param im2: image 1 after Translation.
     :param num_iterations: number of iterations for iterative refinement.
-    :param regularization: regularization parameter to handle singular matrices.
     :return: Translation matrix by LK.
     """
-    # Compute image gradients
-    Ix = cv2.filter2D(im1, -1, np.array([[-1, 1]]), borderType=cv2.BORDER_REPLICATE)
-    Iy = cv2.filter2D(im1, -1, np.array([[-1], [1]]), borderType=cv2.BORDER_REPLICATE)
-    It = im2 - im1
-
     # Initialize translation matrix
     T = np.eye(3)
 
@@ -189,7 +173,7 @@ def findRigidLK(im1: np.ndarray, im2: np.ndarray) -> np.ndarray:
     :param im2: image 1 after Rigid.
     :return: Rigid matrix by LK.
     """
-    EPS = 0.000001
+    EPS = 0.000001  # Small threshold to determine convergence
     min_error = np.inf
     final_rotation = np.eye(3, dtype=np.float32)  # Identity matrix
     directions = opticalFlow(im1, im2)[1]
@@ -226,31 +210,35 @@ def findTranslationCorr(im1: np.ndarray, im2: np.ndarray) -> np.ndarray:
     :param im2: image 1 after Translation.
     :return: Translation matrix by correlation.
     """
-    EPS = 0.001
-    relevant_gap = 100
+    EPS = 0.001  # Small threshold to determine convergence
+    relevant_gap = 100  # Maximum value for translation in x and y directions
 
     # Generate a grid of translation values
     y_range = np.arange(-relevant_gap, relevant_gap)
     x_range = np.arange(-relevant_gap, relevant_gap)
     translations = np.array(np.meshgrid(y_range, x_range)).T.reshape(-1, 2)
 
-    min_error = np.inf
+    min_error = np.inf  # Initialize the minimum error as infinity
     final_ans = np.array([[1, 0, 0],
                           [0, 1, 0],
-                          [0, 0, 1]], dtype=np.float32)
+                          [0, 0, 1]],
+                         dtype=np.float32)  # Initialize the final transformation matrix as an identity matrix
 
     for translation in translations:
         check = np.array([[1, 0, translation[0]],
                           [0, 1, translation[1]],
-                          [0, 0, 1]], dtype=np.float32)
-        moved_img = cv2.warpPerspective(im1, check, im1.shape[::-1])
-        mse = np.square(im2 - moved_img).mean()
+                          [0, 0, 1]], dtype=np.float32)  # Generate a translation matrix to check the image alignment
 
-        if mse < min_error:
+        moved_img = cv2.warpPerspective(im1, check, im1.shape[::-1])  # Apply the translation to im1
+        mse = np.square(
+            im2 - moved_img).mean()  # Calculating the mean squared error between im2 and the translated image
+
+        if mse < min_error:  # If the current error is smaller than the minimum error
             min_error = mse
-            final_ans = check.copy()
-        if mse < EPS:
-            return final_ans
+            final_ans = check.copy()  # Update the final transformation matrix
+
+        if mse < EPS:  # If the error falls below the convergence threshold
+            return final_ans  # Return the final transformation matrix
 
     return final_ans
 
@@ -261,30 +249,35 @@ def findRigidCorr(im1: np.ndarray, im2: np.ndarray) -> np.ndarray:
     :param im2: image 1 after Rigid.
     :return: Rigid matrix by correlation.
     """
-    EPS = 0.000001
-    min_error = np.inf
-    final_rotation = np.eye(3, dtype=np.float32)  # Initialize as identity matrix
+    num_of_iter_to_conv = 300  # Maximum number of iterations to achieve convergence
+    min_error = np.inf  # Initialize the minimum error as infinity
+    final_rotation = np.eye(3, dtype=np.float32)  # Initialize the final rotation matrix as an identity matrix
     final_rotated_img = None
 
     # Iterate over angles in radians instead of degrees
     angles = np.linspace(0, 2 * np.pi, num=360, endpoint=False)
+    iter_with_no_improve = 0  # Counter variable to track the number of iterations without improvement
     for alpha in angles:
         rotation_matrix = np.array([[np.cos(alpha), -np.sin(alpha), 0],
                                     [np.sin(alpha), np.cos(alpha), 0],
                                     [0, 0, 1]], dtype=np.float32)
-        rotated_img = cv2.warpPerspective(im1, rotation_matrix, im1.shape[::-1])
-        mse = np.square(im2 - rotated_img).mean()
-        print(mse)
-        if mse < min_error:
+        rotated_img = cv2.warpPerspective(im1, rotation_matrix, im1.shape[::-1])  # Apply the rotation to im1
+        mse = np.square(
+            im2 - rotated_img).mean()  # Calculating the mean squared error between im2 and the rotated image
+        prev_min_error = min_error  # Track previous min_error value
+        if mse < min_error:  # If the current error is smaller than the minimum error
             min_error = mse
             final_rotation = rotation_matrix.copy()
             final_rotated_img = rotated_img.copy()
 
-        if mse < EPS:
+        if min_error == prev_min_error:  # If the minimum error remains the same as the previous iteration
+            iter_with_no_improve += 1
+        else:
+            iter_with_no_improve = 0
+        if iter_with_no_improve == num_of_iter_to_conv:  # If the number of iterations without improvement reaches the maximum limit
             break
-
     translation = findTranslationCorr(final_rotated_img, im2)
-    final_ans = np.matmul(translation, final_rotation)
+    final_ans = np.matmul(translation, final_rotation)  # Combine the translation and rotation matrices
 
     return final_ans
 
@@ -294,26 +287,32 @@ def warpImages(im1: np.ndarray, im2: np.ndarray, T: np.ndarray) -> np.ndarray:
     :param im1: input image 1 in grayscale format.
     :param im2: input image 2 in grayscale format.
     :param T: is a 3x3 matrix such that each pixel in image 2
-    is mapped under homogenous coordinates to image 1 (p2=Tp1).
-    :return: warp image 2 according to T and display both image1
-    and the wrapped version of the image2 in the same figure.
+    is mapped under homogeneous coordinates to image 1 (p2=Tp1).
+    :return: warp image 2 according to T and display both image 1
+    and the wrapped version of image 2 in the same figure.
     """
-    height, width = im2.shape
+    height, width = im1.shape
 
+    # Create a mesh grid of X and Y coordinates
     X, Y = np.meshgrid(range(width), range(height))
     new_img = np.array([X.flatten(), Y.flatten(), np.ones_like(X.flatten())])
 
+    # Calculate the coordinates of each pixel in image 1 using the inverse of the transformation matrix T
     old_img = (np.linalg.inv(T)) @ new_img
+
+    # Apply masks to handle pixels that are outside the image bounds
     first_mask = (old_img[0, :] > width) | (old_img[0, :] < 0)
     second_mask = (old_img[1, :] > height) | (old_img[1, :] < 0)
     old_img[0, :][first_mask] = 0
     old_img[1, :][second_mask] = 0
 
+    # Use the calculated coordinates to sample the corresponding pixels from image 2
     transformed_img = im2[old_img[1, :].astype(int), old_img[0, :].astype(int)]
-    transformed_img = transformed_img.reshape((height, width))  # Reshape the transformed image
+
+    # Reshape the transformed image to match the original image dimensions
+    transformed_img = transformed_img.reshape((height, width))
 
     return transformed_img
-
 
 
 # ---------------------------------------------------------------------------
@@ -345,10 +344,16 @@ def laplaceianReduce(img: np.ndarray, levels: int = 4) -> List[np.ndarray]:
     """
     gaussian_pyramid = gaussianPyr(img, levels)
     laplacian_pyr = []
+    img_pyramids = [img]
+
     for i in range(1, levels):
-        blur_img_expanded = gaussExpand(gaussian_pyramid[i], (5, 5))
-        laplacian_img = cv2.subtract(gaussian_pyramid[i - 1], blur_img_expanded)
+        img_down = gaussian_pyramid[i][::2, ::2]  # Downsample the image by taking every alternate pixel
+        img_up = cv2.resize(img_down, (img_pyramids[i-1].shape[1], img_pyramids[i-1].shape[0]))  # Upsample the downsampled image using cv2.resize
+        laplacian_img = img_pyramids[i-1] - img_up  # Compute the Laplacian image
         laplacian_pyr.append(laplacian_img)
+        img_pyramids.append(img_down)
+
+    laplacian_pyr.append(img_pyramids[-1])
     return laplacian_pyr
 
 
@@ -358,12 +363,16 @@ def laplaceianExpand(lap_pyr: List[np.ndarray]) -> np.ndarray:
     :param lap_pyr: Laplacian Pyramid
     :return: Original image
     """
-    orig_img = lap_pyr[-1]
-    # reverse traversal i.e. starts with the smallest laplacian image
-    for i in range(len(lap_pyr) - 1, 0, -1):
-        expanded_orig_img = gaussExpand(orig_img, (5, 5))
-        orig_img = cv2.add(lap_pyr[i - 1], expanded_orig_img)
-    return orig_img
+    levels = len(lap_pyr)
+    img_pyramids = [lap_pyr[levels - 1]]
+
+    for i in range(levels - 2, -1, -1):
+        img_up = cv2.resize(img_pyramids[0],
+                            (lap_pyr[i].shape[1], lap_pyr[i].shape[0]))  # Upsample the image
+        orig_img = cv2.add(lap_pyr[i], img_up)  # Add the upsampled image to the current level Laplacian
+        img_pyramids.insert(0, orig_img)
+
+    return img_pyramids[0]
 
 
 def pyrBlend(img_1: np.ndarray, img_2: np.ndarray,
